@@ -1,0 +1,11 @@
+{
+    // If you’re running macOS, use "terminal.integrated.env.osx" instead.
+    "terminal.integrated.env.linux": {
+      "EDITOR": "code --wait",
+      "GIT_EDITOR": "code --wait"
+    },
+    "files.associations": {
+      "if_ether.h": "c",
+      "numbers": "c"
+    }
+}

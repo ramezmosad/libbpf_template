@@ -76,24 +76,7 @@ static void sig_handler(int sig)
 static int handle_event(void *ctx, void *data, size_t data_sz)
 {
 	const struct event *e = data;
-	struct tm *tm;
-	char ts[32];
-	time_t t;
-
-	time(&t);
-	tm = localtime(&t);
-	strftime(ts, sizeof(ts), "%H:%M:%S", tm);
-
-	if (e->exit_event) {
-		printf("%-8s %-5s %-16s %-7d %-7d [%u]",
-		       ts, "EXIT", e->comm, e->pid, e->ppid, e->exit_code);
-		if (e->duration_ns)
-			printf(" (%llums)", e->duration_ns / 1000000);
-		printf("\n");
-	} else {
-		printf("%-8s %-5s %-16s %-7d %-7d %s\n",
-		       ts, "EXEC", e->comm, e->pid, e->ppid, e->filename);
-	}
+	printf("Timestamp: %llu\n", e->time);
 
 	return 0;
 }
@@ -110,6 +93,7 @@ int main(int argc, char **argv)
 		return err;
 
 	/* Set up libbpf errors and debug info callback */
+	env.verbose = true;
 	libbpf_set_print(libbpf_print_fn);
 
 	/* Cleaner handling of Ctrl-C */
@@ -124,7 +108,9 @@ int main(int argc, char **argv)
 	}
 
 	/* Parameterize BPF code with minimum duration parameter */
+	#if 0
 	skel->rodata->min_duration_ns = env.min_duration_ms * 1000000ULL;
+	#endif
 
 	/* Load & verify BPF programs */
 	err = bootstrap_bpf__load(skel);
@@ -141,7 +127,16 @@ int main(int argc, char **argv)
 	}
 
 	/* Set up ring buffer polling */
-	rb = ring_buffer__new(bpf_map__fd(skel->maps.rb), handle_event, NULL, NULL);
+
+	int map_fd = bpf_map__fd(skel->maps.events);
+	if (map_fd < 0)
+	{
+		err = -errno;
+		fprintf(stderr, "Failed to get map file descriptor, %d\n", err);
+		goto cleanup;
+	}
+
+	rb = ring_buffer__new(bpf_map__fd(skel->maps.events), handle_event, NULL, NULL);
 	if (!rb) {
 		err = -1;
 		fprintf(stderr, "Failed to create ring buffer\n");
@@ -149,17 +144,18 @@ int main(int argc, char **argv)
 	}
 
 	/* Process events */
-	printf("%-8s %-5s %-16s %-7s %-7s %s\n",
-	       "TIME", "EVENT", "COMM", "PID", "PPID", "FILENAME/EXIT CODE");
-	while (!exiting) {
-		err = ring_buffer__poll(rb, 100 /* timeout, ms */);
-		/* Ctrl-C will cause -EINTR */
-		if (err == -EINTR) {
+	printf("Listening for events...\n");
+	while (!exiting)
+	{
+		err = ring_buffer__poll(rb, 100);
+		if (err == -EINTR)
+		{
 			err = 0;
 			break;
 		}
-		if (err < 0) {
-			printf("Error polling perf buffer: %d\n", err);
+		if (err < 0)
+		{
+			printf("Error pulling perf buffer: %d\n", err);
 			break;
 		}
 	}

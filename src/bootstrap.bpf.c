@@ -1,112 +1,82 @@
 // SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause
 /* Copyright (c) 2020 Facebook */
-#include "vmlinux.h"
-#include <bpf/bpf_helpers.h>
-#include <bpf/bpf_tracing.h>
-#include <bpf/bpf_core_read.h>
-#include "bootstrap.h"
+#include "bootstrap.bpf.h"
 
 char LICENSE[] SEC("license") = "Dual BSD/GPL";
 
-struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
-	__uint(max_entries, 8192);
-	__type(key, pid_t);
-	__type(value, u64);
-} exec_start SEC(".maps");
+#define IP_ADDRESS(x) (unsigned int)(127 + (0 << 8) + (0 << 16) + (1 << 24))
+#define ETH_P_IP 0x0800
 
 struct {
 	__uint(type, BPF_MAP_TYPE_RINGBUF);
-	__uint(max_entries, 256 * 1024);
-} rb SEC(".maps");
+	__uint(max_entries, 1 << 24);
+} events SEC(".maps");
 
-const volatile unsigned long long min_duration_ns = 0;
-
-SEC("tp/sched/sched_process_exec")
-int handle_exec(struct trace_event_raw_sched_process_exec *ctx)
+SEC("xdp")
+int  xdp_parser_func(struct xdp_md *ctx)
 {
-	struct task_struct *task;
-	unsigned fname_off;
-	struct event *e;
-	pid_t pid;
-	u64 ts;
+	void *data_end = (void *) (long) ctx->data_end;
+	void *data = (void*) (long)ctx->data;
 
-	/* remember time exec() was executed for this PID */
-	pid = bpf_get_current_pid_tgid() >> 32;
-	ts = bpf_ktime_get_ns();
-	bpf_map_update_elem(&exec_start, &pid, &ts, BPF_ANY);
-
-	/* don't emit exec events when minimum duration is specified */
-	if (min_duration_ns)
-		return 0;
-
-	/* reserve sample from BPF ringbuf */
-	e = bpf_ringbuf_reserve(&rb, sizeof(*e), 0);
-	if (!e)
-		return 0;
-
-	/* fill out the sample with data */
-	task = (struct task_struct *)bpf_get_current_task();
-
-	e->exit_event = false;
-	e->pid = pid;
-	e->ppid = BPF_CORE_READ(task, real_parent, tgid);
-	bpf_get_current_comm(&e->comm, sizeof(e->comm));
-
-	fname_off = ctx->__data_loc_filename & 0xFFFF;
-	bpf_probe_read_str(&e->filename, sizeof(e->filename), (void *)ctx + fname_off);
-
-	/* successfully submit it to user-space for post-processing */
-	bpf_ringbuf_submit(e, 0);
-	return 0;
-}
-
-SEC("tp/sched/sched_process_exit")
-int handle_exit(struct trace_event_raw_sched_process_template* ctx)
-{
-	struct task_struct *task;
-	struct event *e;
-	pid_t pid, tid;
-	u64 id, ts, *start_ts, duration_ns = 0;
+	bpf_printk("Check if we got a packet");
 	
-	/* get PID and TID of exiting thread/process */
-	id = bpf_get_current_pid_tgid();
-	pid = id >> 32;
-	tid = (u32)id;
+	struct ethhdr *eth = data;
+	if (data + sizeof(struct ethhdr) > data_end)
+	{
+		bpf_printk("Invalid ethhdr size\n");
+		return XDP_ABORTED;
+	}
 
-	/* ignore thread exits */
-	if (pid != tid)
-		return 0;
+	if (bpf_ntohs(eth->h_proto) != ETH_P_IP)
+	{
+		bpf_printk("Not an IP packet\n");
+		return XDP_PASS;
+	}
 
-	/* if we recorded start of the process, calculate lifetime duration */
-	start_ts = bpf_map_lookup_elem(&exec_start, &pid);
-	if (start_ts)
-		duration_ns = bpf_ktime_get_ns() - *start_ts;
-	else if (min_duration_ns)
-		return 0;
-	bpf_map_delete_elem(&exec_start, &pid);
+	struct iphdr *iph = data + sizeof(struct ethhdr);
+	if (data + sizeof(struct ethhdr) + sizeof(struct iphdr) > data_end)
+	{
+		bpf_printk("Invalid iphdr size\n");
+		return XDP_ABORTED;
+	}
 
-	/* if process didn't live long enough, return early */
-	if (min_duration_ns && duration_ns < min_duration_ns)
-		return 0;
+	if ((iph->protocol) != IPPROTO_TCP)
+	{
+		bpf_printk("Not a TCP packet\n");
+		return XDP_PASS;
+	}
 
-	/* reserve sample from BPF ringbuf */
-	e = bpf_ringbuf_reserve(&rb, sizeof(*e), 0);
+	bpf_printk("got packet from %x", iph->saddr);
+
+	//I'M COMMENTING OUT THIS CODE BECAUSE IT'S USED FOR LOAD BALANCING
+	//WHICH ISN'T MY GOAL ATM
+
+	// if (iph->saddr == IP_ADDRESS(CLIENT))
+	// {
+	// 	char backend = BACKEND_1;
+	// 	if (bpf_ktime_get_ns() % 2)
+	// 	{
+	// 		backend = BACKEND_2;
+	// 	}
+	// 	iph->daddr = IP_ADDRESS(backend);
+	// 	eth->h_dest[5] = backend;
+	// }
+	// else
+	// {
+	// 	iph->daddr = IP_ADDRESS(CLIENT);
+	// 	eth->h_dest[5] = CLIENT;
+	// }
+
+	struct event *e;
+	e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
 	if (!e)
-		return 0;
+	{
+		bpf_printk("ringbuf reserve failed\n");
+		return XDP_ABORTED;
+	}
 
-	/* fill out the sample with data */
-	task = (struct task_struct *)bpf_get_current_task();
-
-	e->exit_event = true;
-	e->duration_ns = duration_ns;
-	e->pid = pid;
-	e->ppid = BPF_CORE_READ(task, real_parent, tgid);
-	e->exit_code = (BPF_CORE_READ(task, exit_code) >> 8) & 0xff;
-	bpf_get_current_comm(&e->comm, sizeof(e->comm));
-
-	/* send data to user-space for post-processing */
+	e->time = bpf_ktime_get_ns();
 	bpf_ringbuf_submit(e, 0);
-	return 0;
-}
 
+	return XDP_PASS;
+}
