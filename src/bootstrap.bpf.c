@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause
 /* Copyright (c) 2020 Facebook */
-#include "bootstrap.bpf.h"
-#include "event.h"
+#include <vmlinux.h>
+#include <bpf/bpf_endian.h>
+#include <bpf/bpf_helpers.h>
+#include "bootstrap.h"
+#include "const.h"
 
 char LICENSE[] SEC("license") = "Dual BSD/GPL";
 

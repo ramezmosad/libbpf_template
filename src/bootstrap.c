@@ -1,14 +1,21 @@
 // SPDX-License-Identifier: (LGPL-2.1 OR BSD-2-Clause)
 /* Copyright (c) 2020 Facebook */
 #include <argp.h>
+#include <arpa/inet.h>
+#include <assert.h>
+#include <bpf/libbpf.h>
+#include <linux/if_packet.h>
+#include <linux/if_ether.h>
+#include <linux/in.h>
+#include <net/if.h>
 #include <signal.h>
 #include <stdio.h>
-#include <time.h>
 #include <sys/resource.h>
-#include <bpf/libbpf.h>
+#include <sys/socket.h>
+#include <unistd.h>
 #include "bootstrap.h"
 #include "bootstrap.skel.h"
-#include "event.h"
+#include "const.h"
 
 static struct env {
 	bool verbose;
@@ -112,6 +119,8 @@ int main(int argc, char **argv)
 	if (err)
 		return err;
 
+	unsigned int interface_index = if_nametoindex("lo");
+
 	/* Set up libbpf errors and debug info callback */
 	libbpf_set_print(libbpf_print_fn);
 
@@ -139,6 +148,7 @@ int main(int argc, char **argv)
 	}
 
 	/* Attach tracepoints */
+	skel->links.xdp_parser_func = bpf_program__attach_xdp(skel->progs.xdp_parser_func, interface_index);
 	err = bootstrap_bpf__attach(skel);
 	if (err) {
 		fprintf(stderr, "Failed to attach BPF skeleton\n");

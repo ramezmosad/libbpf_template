@@ -6,15 +6,17 @@
 #define TASK_COMM_LEN 16
 #define MAX_FILENAME_LEN 127
 
-#include "linux/in6.h"
-
-#ifndef __LINUX_IN6_H
-#define __LINUX_IN6_H
-#endif
+struct event {
+    unsigned long long time;
+    __be32 src_ip;
+    __be32 dst_ip;
+    __be16 src_port;
+    __be16 dst_port;
+};
 
 typedef union {
     __be32 ipv4;
-    struct in6_addr ipv6;
+    // struct in6_addr ipv6;
 } ip_address;
 
 struct flow {
