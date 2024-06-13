@@ -6,10 +6,6 @@
 #include <bpf/bpf_core_read.h>
 #include <bpf/bpf_endian.h>
 
-struct event {
-    unsigned long long time;
-};
-
 typedef union {
     __be32 ipv4;
     struct in6_addr ipv6;

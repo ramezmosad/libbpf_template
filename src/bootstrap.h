@@ -6,15 +6,11 @@
 #define TASK_COMM_LEN 16
 #define MAX_FILENAME_LEN 127
 
+#include "linux/in6.h"
+
 #ifndef __LINUX_IN6_H
 #define __LINUX_IN6_H
-#include <linux/types.h>
-#include <linux/in6.h>
 #endif
-
-struct event {
-    unsigned long long time;
-};
 
 typedef union {
     __be32 ipv4;

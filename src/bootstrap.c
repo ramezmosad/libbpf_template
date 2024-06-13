@@ -8,6 +8,7 @@
 #include <bpf/libbpf.h>
 #include "bootstrap.h"
 #include "bootstrap.skel.h"
+#include "event.h"
 
 static struct env {
 	bool verbose;
@@ -73,10 +74,29 @@ static void sig_handler(int sig)
 	exiting = true;
 }
 
+// function to convert saddr and daddr into readable ip addr
+static void print_ip(__be32 ip)
+{
+	unsigned char bytes[4];
+	bytes[0] = ip & 0xFF;
+	bytes[1] = (ip >> 8) & 0xFF;
+	bytes[2] = (ip >> 16) & 0xFF;
+	bytes[3] = (ip >> 24) & 0xFF;
+	printf("%d.%d.%d.%d", bytes[3], bytes[2], bytes[1], bytes[0]);
+}
+
+
 static int handle_event(void *ctx, void *data, size_t data_sz)
 {
 	const struct event *e = data;
-	printf("Timestamp: %llu\n", e->time);
+	printf("Handling event\n");
+	printf("Timestamp: %llu, Source IP: ", e->time);
+	print_ip(e->src_ip);
+
+	printf(", Destination IP: ");
+	print_ip(e->dst_ip);
+
+	printf(", Source Port: %d, Destination Port: %d\n", ntohs(e->src_port), ntohs(e->dst_port));
 
 	return 0;
 }
@@ -93,7 +113,6 @@ int main(int argc, char **argv)
 		return err;
 
 	/* Set up libbpf errors and debug info callback */
-	env.verbose = true;
 	libbpf_set_print(libbpf_print_fn);
 
 	/* Cleaner handling of Ctrl-C */
@@ -127,7 +146,6 @@ int main(int argc, char **argv)
 	}
 
 	/* Set up ring buffer polling */
-
 	int map_fd = bpf_map__fd(skel->maps.events);
 	if (map_fd < 0)
 	{
@@ -136,6 +154,7 @@ int main(int argc, char **argv)
 		goto cleanup;
 	}
 
+	printf("Setting up ring buffer...");
 	rb = ring_buffer__new(bpf_map__fd(skel->maps.events), handle_event, NULL, NULL);
 	if (!rb) {
 		err = -1;

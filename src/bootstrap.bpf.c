@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause
 /* Copyright (c) 2020 Facebook */
 #include "bootstrap.bpf.h"
+#include "event.h"
 
 char LICENSE[] SEC("license") = "Dual BSD/GPL";
 
@@ -46,7 +47,15 @@ int  xdp_parser_func(struct xdp_md *ctx)
 		return XDP_PASS;
 	}
 
-	bpf_printk("got packet from %x", iph->saddr);
+	struct tcphdr *tcph = (struct tcphdr *)(iph + 1);
+	if ((void *)(tcph + 1) > data_end)
+	{
+		bpf_printk("invalid tcp header size");
+		return XDP_ABORTED;
+	}
+
+	bpf_printk("src ip: %x, dst ip: %x\n", iph->saddr, iph->daddr);
+	bpf_printk("src port: %d, dst port: %d\n", bpf_ntohs(tcph->source), bpf_ntohs(tcph->dest));
 
 	//I'M COMMENTING OUT THIS CODE BECAUSE IT'S USED FOR LOAD BALANCING
 	//WHICH ISN'T MY GOAL ATM
@@ -76,6 +85,13 @@ int  xdp_parser_func(struct xdp_md *ctx)
 	}
 
 	e->time = bpf_ktime_get_ns();
+	e->src_ip = iph->saddr;
+	e->dst_ip = iph->daddr;
+	e->src_port = tcph->source;
+	e->dst_port = tcph->dest;
+
+	bpf_printk("Submitting event: src_ip=%x, dst_ip=%x\n", 
+		e->src_ip, e->dst_ip, e->src_port);
 	bpf_ringbuf_submit(e, 0);
 
 	return XDP_PASS;
