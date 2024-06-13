@@ -89,7 +89,7 @@ static void print_ip(__be32 ip)
 	bytes[1] = (ip >> 8) & 0xFF;
 	bytes[2] = (ip >> 16) & 0xFF;
 	bytes[3] = (ip >> 24) & 0xFF;
-	printf("%d.%d.%d.%d", bytes[3], bytes[2], bytes[1], bytes[0]);
+	printf("%d.%d.%d.%d", bytes[0], bytes[1], bytes[2], bytes[3]);
 }
 
 
@@ -119,7 +119,7 @@ int main(int argc, char **argv)
 	if (err)
 		return err;
 
-	unsigned int interface_index = if_nametoindex("lo");
+	unsigned int interface_index = if_nametoindex("enp0s1");
 
 	/* Set up libbpf errors and debug info callback */
 	libbpf_set_print(libbpf_print_fn);
